@@ -23,10 +23,16 @@ from flask_socketio import SocketIO, emit, send
 sessions = {}
 
 
-# Creates an abomination of a data item in it's writer's on words:
+# Creates an abomination of a data item in it's writer's own words:
 # defines current_user.user_data. I would recommend just experimenting to see
 # what the structure is.
 class User(UserMixin):
+
+    def __init__(self, userID):
+        self.id = userID
+        self.email = db.accounts.get_email_by_id(userID)
+        self.user_data = None
+
     def initialize_user_data(self):
         data = {}
 
@@ -129,11 +135,27 @@ class User(UserMixin):
             return None
 
         return user_id
+    
+    #Copied from get_reset_token
+    '''
+    The confirmation token for the email for account registration. 
+    Accounts are made and then the confirmation token is sent.
+    '''
+    def get_confirmation_token(self, expires_sec=1800):
+        s = Serializer(app.config["SECRET_KEY"], expires_sec)
+        return s.dumps({'user_id': self.id}).decode('utf-8')
+    def verify_confirmation_token(token):
+        s = Serializer(app.config["SECRET_KEY"])
 
-    def __init__(self, userID):
-        self.id = userID
-        self.email = db.accounts.get_email_by_id(userID)
-        self.user_data = None
+        try:
+            user_id = s.loads(token)['user_id']
+        except:
+            return None
+        
+        return user_id
+
+
+    
 
 
 @login_manager.user_loader
@@ -253,13 +275,12 @@ def get_sensor_data_range_route():
 
     return chart_data
 
+
 # POST sensor  settings to the db
 @app.route("/sensors/sensor-settings/store", methods=["POST"])
 @login_required
 def store_settings_route():
     request_data = request.json
-
-    logger.info("{}".format(request_data))
 
     if str(db.sensors.get_acc_id_by_sens_id(request_data["sensorID"])) != str(current_user.id):
         return "Unauthorized", 403
@@ -271,10 +292,7 @@ def store_settings_route():
             request_data["radius"],
             request_data["height"],
             request_data["sensorBottomHeight"],
-            request_data["sensorTopHeight"],
-            request_data["base"],
-            request_data["majorRadius"],
-            request_data["minorRadius"]]
+            request_data["sensorTopHeight"]]
 
     result = db.settings.store_sensor_settings(data)
     return {"result": result}
@@ -309,6 +327,10 @@ from the form in the registration template, hashing the chosen password
 and, then storing all relevant information into the database
 
 the form on the front end confirms password choice, and well as if the email is valid
+
+Added on 10-28-2021:
+Once the form is submitted,
+an email is generated and sent to the user to confirm registration
 '''
 @app.route("/register", methods=['GET', 'POST'])
 def register():
@@ -325,12 +347,27 @@ def register():
         lastname = fullname[-1]
 
         db.accounts.create_account(form.email.data, firstname, lastname, hashed_pass)
+        user = db.accounts.get_id_by_email(form.email.data)
+        user_obj = User(user)
+        token = User.get_confirmation_token(user_obj)
+        email.send_confirmation_email(form.email.data, url_for('confirmation', token=token, _external=True))
 
-        flash(f'Your account has been Created! You may now Login', 'success')
+        flash(f'Your account has been Created! An account confirmation email has been sent to the submitted email. \
+                To move forward in account registration, please go to your registered email and click the confirmation \
+                link that has been sent.', 'success')
+
         return redirect(url_for('login'))
-
+    
     return render_template('register.html', title='Register', form=form)
 
+@app.route('/register/<token>', methods=['GET','POST'])
+def confirmation(token):
+    user = load_user(User.verify_confirmation_token(token))
+    if user is None:
+        print("no")
+    else:
+        return redirect(url_for('login'))
+    return redirect(url_for('register'))
 
 @app.route("/sensor", methods=['POST'])
 def sensor():
@@ -483,7 +520,10 @@ def account():
     return render_template('account.html', title='Account', form=form, sensorAccountForm=sensorAccountForm,
                            account_info=current_user.user_data, currentUser=current_user)
 
-def update_settings_form():
+
+@app.route("/settings", methods=['GET', 'POST'])
+@login_required
+def settings():
     form = SettingsForm()
     alerts = []
     for sensor in db.sensors.get_all_sensors(current_user.id):
@@ -496,12 +536,6 @@ def update_settings_form():
             if db.sensors.get_sensor_info(sensor)[0][6] not in form.sensorGroup.choices:
                 form.sensorGroup.choices.append(
                     (db.sensors.get_sensor_info(sensor)[0][6], db.sensors.get_sensor_info(sensor)[0][6]))
-    return form, alerts
-
-@app.route("/settings", methods=['GET', 'POST'])
-@login_required
-def settings():
-    form, alerts = update_settings_form()
     alerts.sort()
 
     for alert in alerts:
@@ -529,8 +563,6 @@ def settings():
             if not form.newSensorGroup.data == '':
                 db.sensors.set_sensor_group(form.sensorID.data, form.newSensorGroup.data)
                 flash("Changed Current Sensor's Group to: " + form.newSensorGroup.data, 'success')
-        form, alerts = update_settings_form()
-
     return render_template('settings.html', title='Settings', form=form, account_info=current_user.user_data,
                            alerts=alerts)
 
@@ -558,6 +590,21 @@ def reset_request():
     return render_template('reset_request.html', title="Reset Password", form=form)
 
 
+@app.route("/confirm_account/<user_id>", methods=['GET', 'POST'])
+def confirm_account(user_id):
+    fname, lname = get_name_by_id(user_id)
+    form = LoginForm()
+    
+    if request.method == "POST":
+        output = list(request.form.values())[0]
+        if output == "Activate Account":
+            return redirect(url_for('home'))
+        else:
+            db.accounts.delete_account_by_id(user_id)
+            return "account deleted"
+
+    return render_template('confirm.html', title="confirm_account", user_id=user_id, form=form, fname=fname, lname=lname)
+
 @app.route("/reset_password/<token>", methods=['GET', 'POST'])
 def reset_token(token):
     user = load_user(User.verify_reset_token(token))
@@ -576,6 +623,12 @@ def reset_token(token):
         return redirect(url_for('login'))
 
     return render_template('reset_token.html', title="Reset Password", form=form)
+
+
+#@app.route("/confirm_")
+
+
+
 
 
 # Catch users connecting, store the (session id):(user id) pair in the sessions dictionary
