@@ -204,14 +204,26 @@
 			<div class="content-section">
 					<h4>Delete Alert</h4>
 					<div class="row">
-					<div class="col-6">
+					<div class="col-10 ">
 						{{ form.alerts(class="btn btn-outline-success btn-lg") }}
 					</div>
 
 
+	<div class="content-section">
+			<h4 class>Add Sensor/h4>
+		<div class="row">
+                        <div class="col-5 mr-0 ml-0">
+                        	{{ form.addSensor(class="btn btn-outline-success btn-lg") }}
+			</div>
+			<div class="col-4 mr-0 ml-0">
+                        	{{ form.addSensor(class="form-control form-control-lg", placeholder=" Enter new sensor name", style="text-align: center", onfocus="this.placeholder = ''", onblur="this.placeholder = 'Enter new sensor name'") }}
+                        </div>
+                        <div class="col-3">
+                                {{ form.addSensorButton(class="btn btn-outline-warning btn-lg", style="text-align: center") }}
+                        </div>
 
                         <div class="col-2">
-                                {{ form.removeAlert(class="btn btn-outline-danger btn-lg") }}
+                                {{ form.addSensorButton(class="btn btn-outline-danger btn-lg") }}
                         </div>
                 	</div>
 
@@ -226,5 +238,4 @@
     </div>
 {% endblock %}
 {% endblock %}
-
 
